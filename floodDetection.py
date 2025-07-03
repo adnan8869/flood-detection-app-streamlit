@@ -6,7 +6,8 @@ from streamlit_option_menu import option_menu
 import tensorflow as tf
 from tensorflow.keras.preprocessing import image
 from tensorflow import keras
-
+import warnings
+warnings.filterwarnings('ignore')
 
 # Set page configuration
 st.set_page_config(page_title="Flood Detection System",
@@ -20,37 +21,98 @@ working_dir = os.path.dirname(os.path.abspath(__file__))
 rainfall_model_path = os.path.join(working_dir, 'save model', 'flood_detection_model.keras')
 image_model_path = os.path.join(working_dir, 'save model', 'fine_tuned_flood_detection_model')
 
-# Load the rainfall-based model
-try:
-    st.write(f"Attempting to load rainfall model from: {rainfall_model_path}")
-    rainfall_model = keras.models.load_model(rainfall_model_path, compile=False)
-    st.success("Rainfall-based model loaded successfully.")
+# Custom objects for loading models with compatibility issues
+custom_objects = {
+    'InputLayer': tf.keras.layers.InputLayer
+}
 
-except FileNotFoundError:
-    st.error(f"Rainfall model file not found at {rainfall_model_path}. Please ensure the file exists in the 'save model' subfolder.")
-    rainfall_model = None
-except Exception as e:
-    st.error(f"Error loading rainfall model: {e}")
-    rainfall_model = None
+# Load the rainfall-based model with error handling
+@st.cache_resource
+def load_rainfall_model():
+    try:
+        st.write(f"Attempting to load rainfall model from: {rainfall_model_path}")
+        
+        # Try different loading methods
+        try:
+            # Method 1: Direct loading with custom objects
+            model = keras.models.load_model(rainfall_model_path, 
+                                          custom_objects=custom_objects,
+                                          compile=False)
+            st.success("Rainfall-based model loaded successfully.")
+            return model
+        except Exception as e1:
+            st.warning(f"Direct loading failed: {e1}")
+            
+            # Method 2: Try with different TensorFlow loading options
+            try:
+                with tf.keras.utils.custom_object_scope(custom_objects):
+                    model = tf.keras.models.load_model(rainfall_model_path, compile=False)
+                st.success("Rainfall-based model loaded successfully (method 2).")
+                return model
+            except Exception as e2:
+                st.warning(f"Second method failed: {e2}")
+                
+                # Method 3: Try loading with SavedModel format
+                try:
+                    model = tf.saved_model.load(rainfall_model_path)
+                    st.success("Rainfall-based model loaded as SavedModel.")
+                    return model
+                except Exception as e3:
+                    st.error(f"All loading methods failed. Last error: {e3}")
+                    return None
+                    
+    except FileNotFoundError:
+        st.error(f"Rainfall model file not found at {rainfall_model_path}. Please ensure the file exists in the 'save model' subfolder.")
+        return None
+    except Exception as e:
+        st.error(f"Error loading rainfall model: {e}")
+        return None
 
-# Load the image-based model
-try:
-    st.write(f"Attempting to load image model from: {image_model_path}")
-    possible_extensions = ['', '.h5', '.keras']
-    for ext in possible_extensions:
-        model_path = image_model_path + ext
-        if os.path.exists(model_path):
-            image_model = tf.keras.models.load_model(model_path)
-            st.success("Image-based model loaded successfully.")
-            break
-    else:
-        raise FileNotFoundError
-except FileNotFoundError:
-    st.error(f"Image model file not found at {image_model_path}. Please ensure the file exists in the 'save model' subfolder with a supported extension (.h5 or .keras).")
-    image_model = None
-except Exception as e:
-    st.error(f"Error loading image model: {e}")
-    image_model = None
+# Load the image-based model with error handling
+@st.cache_resource
+def load_image_model():
+    try:
+        st.write(f"Attempting to load image model from: {image_model_path}")
+        
+        # Try different file extensions and loading methods
+        possible_extensions = ['', '.h5', '.keras']
+        
+        for ext in possible_extensions:
+            model_path = image_model_path + ext
+            if os.path.exists(model_path):
+                try:
+                    # Method 1: Direct loading with custom objects
+                    model = tf.keras.models.load_model(model_path, 
+                                                     custom_objects=custom_objects,
+                                                     compile=False)
+                    st.success(f"Image-based model loaded successfully from {model_path}.")
+                    return model
+                except Exception as e1:
+                    st.warning(f"Direct loading failed for {model_path}: {e1}")
+                    
+                    # Method 2: Try with custom object scope
+                    try:
+                        with tf.keras.utils.custom_object_scope(custom_objects):
+                            model = tf.keras.models.load_model(model_path, compile=False)
+                        st.success(f"Image-based model loaded successfully (method 2) from {model_path}.")
+                        return model
+                    except Exception as e2:
+                        st.warning(f"Second method failed for {model_path}: {e2}")
+                        continue
+        
+        # If no file found with any extension
+        raise FileNotFoundError("No model file found with supported extensions")
+        
+    except FileNotFoundError:
+        st.error(f"Image model file not found at {image_model_path}. Please ensure the file exists in the 'save model' subfolder with a supported extension (.h5 or .keras).")
+        return None
+    except Exception as e:
+        st.error(f"Error loading image model: {e}")
+        return None
+
+# Load models
+rainfall_model = load_rainfall_model()
+image_model = load_image_model()
 
 # Function to predict flood risk based on rainfall data
 def predict_flood_risk(jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec):
@@ -59,12 +121,36 @@ def predict_flood_risk(jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, de
     try:
         # Prepare input data
         input_data = np.array([[jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec]])
-        # Predict using the loaded model    
-        prediction = rainfall_model.predict(input_data)
-        probability = rainfall_model.predict_proba(input_data)[0][1] if hasattr(rainfall_model, 'predict_proba') else None
-        result = "High risk of flood" if prediction[0] == 1 else "Low risk of flood"
-        if probability is not None:
-            result += f" (Probability: {probability:.2%})"
+        
+        # Handle different model types
+        if hasattr(rainfall_model, 'predict'):
+            # Standard Keras model
+            prediction = rainfall_model.predict(input_data, verbose=0)
+            
+            # Handle different prediction formats
+            if len(prediction.shape) > 1 and prediction.shape[1] > 1:
+                # Multi-class output
+                pred_class = np.argmax(prediction[0])
+                probability = np.max(prediction[0])
+            else:
+                # Binary classification
+                pred_class = 1 if prediction[0] > 0.5 else 0
+                probability = float(prediction[0]) if prediction[0] <= 1 else float(prediction[0]) / 100
+            
+            result = "High risk of flood" if pred_class == 1 else "Low risk of flood"
+            result += f" (Confidence: {probability:.2%})"
+            
+        else:
+            # SavedModel format
+            try:
+                prediction = rainfall_model(input_data)
+                pred_class = 1 if prediction.numpy()[0] > 0.5 else 0
+                probability = float(prediction.numpy()[0])
+                result = "High risk of flood" if pred_class == 1 else "Low risk of flood"
+                result += f" (Confidence: {probability:.2%})"
+            except:
+                result = "Error: Could not make prediction with SavedModel format"
+        
         return result
     except Exception as e:
         return f"Error in prediction: {e}"
@@ -80,19 +166,37 @@ def predict_flood_image(file):
         img_array = np.expand_dims(img_array, axis=0)       # Shape: (1, 100, 100, 3)
         img_array = img_array / 255.0                        # Normalize
 
-        # Predict
-        prediction = image_model.predict(img_array)
-        probability = prediction[0][0]  # Assuming binary classification: flood probability
-
-        if probability >= 0.5:
-            return f"Prediction: High Flood Risk"
+        # Handle different model types
+        if hasattr(image_model, 'predict'):
+            # Standard Keras model
+            prediction = image_model.predict(img_array, verbose=0)
+            
+            # Handle different prediction formats
+            if len(prediction.shape) > 1 and prediction.shape[1] > 1:
+                # Multi-class output
+                probability = np.max(prediction[0])
+                pred_class = np.argmax(prediction[0])
+            else:
+                # Binary classification
+                probability = float(prediction[0][0]) if hasattr(prediction[0], '__len__') else float(prediction[0])
+                pred_class = 1 if probability >= 0.5 else 0
+            
         else:
-            return f"Prediction: Low Flood Risk"
+            # SavedModel format
+            try:
+                prediction = image_model(img_array)
+                probability = float(prediction.numpy()[0][0])
+                pred_class = 1 if probability >= 0.5 else 0
+            except:
+                return "Error: Could not make prediction with SavedModel format"
+
+        if pred_class == 1:
+            return f"Prediction: High Flood Risk (Confidence: {probability:.2%})"
+        else:
+            return f"Prediction: Low Flood Risk (Confidence: {(1-probability):.2%})"
+            
     except Exception as e:
         return f"Error in image prediction: {e}"
-
-
-
 
 # Sidebar for navigation
 with st.sidebar:
@@ -104,7 +208,7 @@ with st.sidebar:
 
 # Rainfall-Based Detection Section
 if selected == 'Rainfall-Based Detection':
-    st.title('Rainfall-Based Flood Detection')
+    st.title('🌧️ Rainfall-Based Flood Detection')
 
     # Input fields for monthly rainfall
     st.subheader("Enter Monthly Rainfall (mm)")
@@ -116,7 +220,7 @@ if selected == 'Rainfall-Based Detection':
         sep = st.number_input('September', min_value=0.0, max_value=2000.0, step=0.1, value=0.0)
     with col2:
         feb = st.number_input('February', min_value=0.0, max_value=2000.0, step=0.1, value=0.0)
-        jun = st.number_input('June', min_value=0.0, max_value=2000.0, step=0.1, value=0.0)
+        jun = st.number_input('June', min_value=0.0, max_value=2000.0, step=0.1, value=0.1)
         oct = st.number_input('October', min_value=0.0, max_value=2000.0, step=0.1, value=0.0)
     with col3:
         mar = st.number_input('March', min_value=0.0, max_value=2000.0, step=0.1, value=0.0)
@@ -128,33 +232,66 @@ if selected == 'Rainfall-Based Detection':
         dec = st.number_input('December', min_value=0.0, max_value=2000.0, step=0.1, value=0.0)
 
     # Button to run rainfall-based detection
-    if st.button('Run Rainfall-Based Detection'):
+    if st.button('🔍 Run Rainfall-Based Detection'):
         # Validate inputs
         inputs = [jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec]
-        if any(val <= 0.0 for val in inputs):
-            st.error("All fields must be filled")
+        if sum(inputs) == 0:
+            st.warning("Please enter at least some rainfall data for accurate prediction.")
         elif any(val > 2000.0 for val in inputs):
             st.error("Rainfall values exceed the realistic upper limit (2000 mm max).")
         else:
-            result = predict_flood_risk(jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec)
-            st.write(f"**Result**: {result}")
+            with st.spinner('Analyzing rainfall data...'):
+                result = predict_flood_risk(jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec)
+            
+            if "High risk" in result:
+                st.error(f"⚠️ **Result**: {result}")
+            else:
+                st.success(f"✅ **Result**: {result}")
 
 # Image-Based Detection Section
 if selected == 'Image-Based Detection':
-    st.title('Image-Based Flood Detection')
+    st.title('📸 Image-Based Flood Detection')
     st.subheader("Upload an Image for Flood Detection")
     
     # File uploader for image
-    uploaded_file = st.file_uploader("Choose an image (jpg or png)", type=["jpg", "png"])
+    uploaded_file = st.file_uploader("Choose an image (jpg or png)", type=["jpg", "png", "jpeg"])
     
     if uploaded_file is not None:
         # Display the uploaded image
-        st.image(uploaded_file, caption="Uploaded Image", width=300)
+        col1, col2 = st.columns([1, 2])
         
-        # Run prediction
-        if st.button('Run Image-Based Detection'):
-            result = predict_flood_image(uploaded_file)
-            st.write(f"**Result**: {result}")
+        with col1:
+            st.image(uploaded_file, caption="Uploaded Image", width=300)
+        
+        with col2:
+            # Run prediction
+            if st.button('🔍 Run Image-Based Detection'):
+                with st.spinner('Analyzing image...'):
+                    result = predict_flood_image(uploaded_file)
+                
+                if "High Flood Risk" in result:
+                    st.error(f"⚠️ **Result**: {result}")
+                else:
+                    st.success(f"✅ **Result**: {result}")
 
-# Instructions to run the app
-# python -m streamlit run FloodDetection.py
+# Footer
+st.markdown("---")
+st.markdown("**Note**: This is a prototype flood detection system. For actual emergency situations, please contact local authorities.")
+
+# Debug information (only shown if models failed to load)
+if rainfall_model is None or image_model is None:
+    with st.expander("Debug Information"):
+        st.write(f"Python version: {os.sys.version}")
+        st.write(f"TensorFlow version: {tf.__version__}")
+        st.write(f"Working directory: {working_dir}")
+        st.write(f"Rainfall model path: {rainfall_model_path}")
+        st.write(f"Image model path: {image_model_path}")
+        st.write(f"Rainfall model exists: {os.path.exists(rainfall_model_path)}")
+        st.write(f"Image model exists: {os.path.exists(image_model_path)}")
+        
+        # List all files in the save model directory
+        save_model_dir = os.path.join(working_dir, 'save model')
+        if os.path.exists(save_model_dir):
+            st.write(f"Files in save model directory: {os.listdir(save_model_dir)}")
+        else:
+            st.write("Save model directory does not exist")
