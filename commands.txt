@@ -1,0 +1,13 @@
+filename = 'flood detection.sav'
+pickle.dump(model, open(filename, 'wb'))
+
+
+# loading the saved model
+loaded_model = pickle.load(open('flood_detection_model.sav', 'rb'))
+
+
+streamlit run "C:\Users\Hajvery Technology\Downloads\heart diseas prediction\fyp\heart disease prediction\heart diseas prediction.py"
+
+
+ 
+streamlit run "C:\Users\Hajvery Technology\Desktop\FINAL YEAR PROJECT\floofDetection.py"
