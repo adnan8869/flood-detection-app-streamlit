@@ -21,9 +21,19 @@ working_dir = os.path.dirname(os.path.abspath(__file__))
 rainfall_model_path = os.path.join(working_dir, 'save model', 'flood_detection_model.keras')
 image_model_path = os.path.join(working_dir, 'save model', 'fine_tuned_flood_detection_model')
 
+# Custom InputLayer class to handle batch_shape parameter
+class CompatibleInputLayer(tf.keras.layers.InputLayer):
+    def __init__(self, batch_shape=None, shape=None, **kwargs):
+        if batch_shape is not None:
+            if shape is None and len(batch_shape) > 1:
+                shape = batch_shape[1:]
+            # Remove batch_shape from kwargs to avoid error
+            kwargs.pop('batch_shape', None)
+        super().__init__(shape=shape, **kwargs)
+
 # Custom objects for loading models with compatibility issues
 custom_objects = {
-    'InputLayer': tf.keras.layers.InputLayer
+    'InputLayer': CompatibleInputLayer
 }
 
 # Load the rainfall-based model with error handling
