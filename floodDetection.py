@@ -7,19 +7,6 @@ import tensorflow as tf
 from tensorflow.keras.preprocessing import image
 from tensorflow import keras
 
-from tensorflow.keras.layers import InputLayer as _InputLayer
-
-# ① Patch InputLayer to accept batch_shape
-class InputLayer(_InputLayer):
-    def __init__(self, *args, batch_shape=None, **kwargs):
-        # If old config gives batch_shape, pass it as batch_input_shape
-        if batch_shape is not None and 'batch_input_shape' not in kwargs:
-            kwargs['batch_input_shape'] = batch_shape
-        super().__init__(*args, **kwargs)
-
-# ② Tell Keras to use our patched InputLayer
-custom_objs = {'InputLayer': InputLayer}
-
 
 # Set page configuration
 st.set_page_config(page_title="Flood Detection System",
@@ -34,69 +21,36 @@ rainfall_model_path = os.path.join(working_dir, 'save model', 'flood_detection_m
 image_model_path = os.path.join(working_dir, 'save model', 'fine_tuned_flood_detection_model')
 
 # Load the rainfall-based model
-# try:
-#     st.write(f"Attempting to load rainfall model from: {rainfall_model_path}")
-#     rainfall_model = keras.models.load_model(rainfall_model_path, compile=False)
-#     st.success("Rainfall-based model loaded successfully.")
-
-# except FileNotFoundError:
-#     st.error(f"Rainfall model file not found at {rainfall_model_path}. Please ensure the file exists in the 'save model' subfolder.")
-#     rainfall_model = None
-# except Exception as e:
-#     st.error(f"Error loading rainfall model: {e}")
-#     rainfall_model = None
-
-# Load the rainfall-based model
 try:
     st.write(f"Attempting to load rainfall model from: {rainfall_model_path}")
-    rainfall_model = keras.models.load_model(
-        rainfall_model_path,
-        custom_objects=custom_objs,
-        compile=False
-    )
+    rainfall_model = keras.models.load_model(rainfall_model_path, compile=False)
     st.success("Rainfall-based model loaded successfully.")
+
+except FileNotFoundError:
+    st.error(f"Rainfall model file not found at {rainfall_model_path}. Please ensure the file exists in the 'save model' subfolder.")
+    rainfall_model = None
 except Exception as e:
     st.error(f"Error loading rainfall model: {e}")
     rainfall_model = None
 
 # Load the image-based model
-# try:
-#     st.write(f"Attempting to load image model from: {image_model_path}")
-#     possible_extensions = ['', '.h5', '.keras']
-#     for ext in possible_extensions:
-#         model_path = image_model_path + ext
-#         if os.path.exists(model_path):
-#             image_model = tf.keras.models.load_model(model_path)
-#             st.success("Image-based model loaded successfully.")
-#             break
-#     else:
-#         raise FileNotFoundError
-# except FileNotFoundError:
-#     st.error(f"Image model file not found at {image_model_path}. Please ensure the file exists in the 'save model' subfolder with a supported extension (.h5 or .keras).")
-#     image_model = None
-# except Exception as e:
-#     st.error(f"Error loading image model: {e}")
-#     image_model = None
-
-# Load the image-based model
 try:
     st.write(f"Attempting to load image model from: {image_model_path}")
-    image_model = None
-    for ext in ['', '.h5', '.keras']:
+    possible_extensions = ['', '.h5', '.keras']
+    for ext in possible_extensions:
         model_path = image_model_path + ext
         if os.path.exists(model_path):
-            image_model = tf.keras.models.load_model(
-                model_path,
-                custom_objects=custom_objs
-            )
+            image_model = tf.keras.models.load_model(model_path)
             st.success("Image-based model loaded successfully.")
             break
-    if image_model is None:
+    else:
         raise FileNotFoundError
+except FileNotFoundError:
+    st.error(f"Image model file not found at {image_model_path}. Please ensure the file exists in the 'save model' subfolder with a supported extension (.h5 or .keras).")
+    image_model = None
 except Exception as e:
     st.error(f"Error loading image model: {e}")
     image_model = None
-
 
 # Function to predict flood risk based on rainfall data
 def predict_flood_risk(jan, feb, mar, apr, may, jun, jul, aug, sep, oct, nov, dec):
