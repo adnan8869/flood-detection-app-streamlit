@@ -22,7 +22,7 @@ image_model_path = os.path.join(working_dir, 'save model', 'fine_tuned_flood_det
 # Load the rainfall-based model
 try:
     st.write(f"Attempting to load rainfall model from: {rainfall_model_path}")
-    rainfall_model = keras.models.load_model('C:\\Users\\Adnan\Desktop\\FINAL YEAR PROJECT\\save model\\flood_detection_model.keras', compile=False)
+    rainfall_model = keras.models.load_model(rainfall_model_path, compile=False)
     st.success("Rainfall-based model loaded successfully.")
 
 except FileNotFoundError:
@@ -39,7 +39,7 @@ try:
     for ext in possible_extensions:
         model_path = image_model_path + ext
         if os.path.exists(model_path):
-            image_model = tf.keras.models.load_model('C:\\Users\\Adnan\\Desktop\\FINAL YEAR PROJECT\\save model\\fine_tuned_flood_detection_model.h5')
+            image_model = tf.keras.models.load_model(model_path)
             st.success("Image-based model loaded successfully.")
             break
     else:
